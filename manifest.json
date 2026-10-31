@@ -1,0 +1,18 @@
+{
+  "id": "./index.html",
+  "name": "Naturibum",
+  "short_name": "Naturibum",
+  "description": "一款以入口為定位的自然連結應用——個人對自然觀察的專輯",
+  "lang": "zh-Hant",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F4EEE1",
+  "theme_color": "#F4EEE1",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
