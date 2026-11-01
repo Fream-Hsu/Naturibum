@@ -403,18 +403,30 @@ const views = {
       <button class="btn" data-go="onboard4">繼續</button>
     </div>`,
 
-  onboard4: () => `
+    onboard4: () => `
     <div class="view">
       <p class="eyebrow">4 / 4</p>
       <h1>留住這段旅程</h1>
       <p class="small" style="margin-bottom:16px">建立帳號，幫你保存往後累積的花圃與紀錄</p>
-      <button class="btn ghost block" data-oauth="google">使用 Google 繼續</button>
-      <button class="btn ghost block" data-oauth="facebook">使用 Facebook 繼續</button>
-      <input id="emailInput" type="email" placeholder="你的電子郵件" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; font-size:13px; margin-bottom:8px; font-family:inherit">
-      <button class="btn block" id="emailLoginBtn">完成註冊</button>
+      <input id="emailInput" type="email" autocomplete="email" placeholder="你的電子郵件" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; font-size:13px; margin-bottom:8px; font-family:inherit">
+      <input id="pwInput" type="password" autocomplete="new-password" placeholder="密碼（至少 6 個字元）" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; font-size:13px; margin-bottom:12px; font-family:inherit">
+      <button class="btn block" id="signUpBtn">建立帳號</button>
+      <button class="btn ghost block" id="signInBtn">我已經有帳號，直接登入</button>
       <div class="spacer"></div>
       <p class="small" style="text-align:center; cursor:pointer" data-go="home">先不要，晚點再說</p>
     </div>`,
+  // onboard4: () => `
+  //   <div class="view">
+  //     <p class="eyebrow">4 / 4</p>
+  //     <h1>留住這段旅程</h1>
+  //     <p class="small" style="margin-bottom:16px">建立帳號，幫你保存往後累積的花圃與紀錄</p>
+  //     <button class="btn ghost block" data-oauth="google">使用 Google 繼續</button>
+  //     <button class="btn ghost block" data-oauth="facebook">使用 Facebook 繼續</button>
+  //     <input id="emailInput" type="email" placeholder="你的電子郵件" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; font-size:13px; margin-bottom:8px; font-family:inherit">
+  //     <button class="btn block" id="emailLoginBtn">完成註冊</button>
+  //     <div class="spacer"></div>
+  //     <p class="small" style="text-align:center; cursor:pointer" data-go="home">先不要，晚點再說</p>
+  //   </div>`,
 
   home: () => {
     const isEve = state.timeOfDay==='evening';
@@ -577,13 +589,33 @@ function bind(view){
     });
   });
   if(view==='onboard4'){
-    screenEl.querySelectorAll('[data-oauth]').forEach(el=>{
-      el.onclick = async ()=>{
-        const { error } = await sb.auth.signInWithOAuth({ provider: el.dataset.oauth, options:{ redirectTo: location.origin + location.pathname } });
-        if(error) alert('這個登入方式還沒在 Supabase 後台啟用 provider，請先設定，或改用 Email 登入。');
-      };
-    });
-    const emailBtn = screenEl.querySelector('#emailLoginBtn');
+    const emailEl = screenEl.querySelector('#emailInput');
+    const pwEl = screenEl.querySelector('#pwInput');
+    const run = async (btn, mode)=>{
+      const email = emailEl.value.trim(), password = pwEl.value;
+      if(!email || password.length < 6){ alert('請輸入電子郵件，密碼至少 6 個字元'); return; }
+      const label = btn.textContent;
+      btn.textContent = '處理中...'; btn.disabled = true;
+      try{
+        const { data, error } = mode==='up'
+          ? await sb.auth.signUp({ email, password })
+          : await sb.auth.signInWithPassword({ email, password });
+        if(error){ alert((mode==='up'?'註冊失敗：':'登入失敗：') + error.message); }
+        else if(mode==='up' && !data.session){ alert('帳號已建立，但還需要驗證信箱，請確認後台已關閉 Confirm email。'); }
+      }catch(err){ alert('發生錯誤：' + err.message); }
+      finally{ btn.textContent = label; btn.disabled = false; }
+    };
+    screenEl.querySelector('#signUpBtn').onclick = e => run(e.currentTarget, 'up');
+    screenEl.querySelector('#signInBtn').onclick = e => run(e.currentTarget, 'in');
+  }
+  // if(view==='onboard4'){
+  //   screenEl.querySelectorAll('[data-oauth]').forEach(el=>{
+  //     el.onclick = async ()=>{
+  //       const { error } = await sb.auth.signInWithOAuth({ provider: el.dataset.oauth, options:{ redirectTo: location.origin + location.pathname } });
+  //       if(error) alert('這個登入方式還沒在 Supabase 後台啟用 provider，請先設定，或改用 Email 登入。');
+  //     };
+  //   });
+  //   const emailBtn = screenEl.querySelector('#emailLoginBtn');
     if(emailBtn){
       emailBtn.onclick = async ()=>{
         const email = screenEl.querySelector('#emailInput').value.trim();
