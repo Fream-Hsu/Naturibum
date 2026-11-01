@@ -689,16 +689,33 @@ if('serviceWorker' in navigator && !['localhost','127.0.0.1'].includes(location.
   window.addEventListener('load', ()=> navigator.serviceWorker.register('sw.js').catch(err=>console.warn('SW 註冊失敗', err)));
 }
 
-(async ()=>{
+  (async ()=>{
   const { data } = await sb.auth.getSession();
   currentUser = data.session?.user ?? null;
   if(currentUser){ await loadWeekEntries(); }
-  sb.auth.onAuthStateChange(async (_event, session)=>{
+
+  currentView = currentUser ? 'home' : 'onboard1';
+  render(currentView);
+
+  sb.auth.onAuthStateChange(async (event, session)=>{
     currentUser = session?.user ?? null;
-    if(currentUser){ await loadWeekEntries(); render(currentView); }
+    if(event === 'SIGNED_IN' && currentUser){
+      await loadWeekEntries();
+      if(currentView.startsWith('onboard')){ goTo('home', {resetStack:true}); }
+    }
+    if(event === 'SIGNED_OUT'){ goTo('onboard1', {resetStack:true}); }
   });
-  render(currentUser ? 'home' : 'onboard1');
 })();
+// (async ()=>{
+//   const { data } = await sb.auth.getSession();
+//   currentUser = data.session?.user ?? null;
+//   if(currentUser){ await loadWeekEntries(); }
+//   sb.auth.onAuthStateChange(async (_event, session)=>{
+//     currentUser = session?.user ?? null;
+//     if(currentUser){ await loadWeekEntries(); render(currentView); }
+//   });
+//   render(currentUser ? 'home' : 'onboard1');
+// })();
 </script>
 </body>
 </html>
