@@ -616,24 +616,24 @@ function bind(view){
   //     };
   //   });
   //   const emailBtn = screenEl.querySelector('#emailLoginBtn');
-    if(emailBtn){
-      emailBtn.onclick = async ()=>{
-        const email = screenEl.querySelector('#emailInput').value.trim();
-        if(!email){ alert('請輸入電子郵件'); return; }
-        emailBtn.textContent = '傳送中...';
-        emailBtn.disabled = true;
-        try{
-          const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.origin + location.pathname } });
-          if(error){ alert('發送失敗：'+error.message); }
-          else{ alert('登入連結已寄出，請到信箱點擊完成註冊。'); }
-        }catch(err){
-          alert('發生錯誤，可能是網路或 CORS 問題：'+err.message);
-        }finally{
-          emailBtn.textContent = '完成註冊';
-          emailBtn.disabled = false;
-        }
-      };
-    }
+  //   if(emailBtn){
+  //     emailBtn.onclick = async ()=>{
+  //       const email = screenEl.querySelector('#emailInput').value.trim();
+  //       if(!email){ alert('請輸入電子郵件'); return; }
+  //       emailBtn.textContent = '傳送中...';
+  //       emailBtn.disabled = true;
+  //       try{
+  //         const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.origin + location.pathname } });
+  //         if(error){ alert('發送失敗：'+error.message); }
+  //         else{ alert('登入連結已寄出，請到信箱點擊完成註冊。'); }
+  //       }catch(err){
+  //         alert('發生錯誤，可能是網路或 CORS 問題：'+err.message);
+  //       }finally{
+  //         emailBtn.textContent = '完成註冊';
+  //         emailBtn.disabled = false;
+  //       }
+  //     };
+  //   }
   }
   const saveBtn = screenEl.querySelector('#saveBtn');
   if(saveBtn){
