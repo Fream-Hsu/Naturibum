@@ -21,14 +21,14 @@
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
   body{
     margin:0; font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Microsoft JhengHei",sans-serif;
-    background:#E9E2D0; color:var(--ink); display:flex; justify-content:center; min-height:100vh;
+    background:#E9E2D0; color:var(--ink); display:flex; justify-content:center; min-height:100vh; min-height:100dvh;
   }
   #phone{
-    width:100%; max-width:390px; min-height:100vh; background:var(--paper);
+    width:100%; max-width:390px; min-height:100vh; min-height:100dvh; background:var(--paper);
     position:relative; overflow:hidden; display:flex; flex-direction:column;
   }
   #screen{flex:1; display:flex; flex-direction:column; position:relative}
-  .view{flex:1; display:flex; flex-direction:column; padding:1.5rem 1.25rem; animation:fadeIn .35s ease}
+  .view{flex:1; display:flex; flex-direction:column; padding:calc(1.5rem + env(safe-area-inset-top,0px)) 1.25rem 1.5rem; animation:fadeIn .35s ease}
   @keyframes fadeIn{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:translateY(0)}}
   @media (prefers-reduced-motion: reduce){ .view{animation:none} }
 
@@ -87,7 +87,7 @@
   }
 
   /* dusk screens */
-  .dusk{background:var(--dusk-bg); color:var(--dusk-text); margin:-1.5rem -1.25rem; padding:1.5rem 1.25rem; flex:1; display:flex; flex-direction:column}
+  .dusk{background:var(--dusk-bg); color:var(--dusk-text); margin:-1.5rem -1.25rem; padding:calc(1.5rem + env(safe-area-inset-top,0px)) 1.25rem 1.5rem; flex:1; display:flex; flex-direction:column}
   .dusk .eyebrow{color:rgba(244,238,225,.5)}
   .dusk .copy{color:rgba(244,238,225,.85)}
   .progress{display:flex; gap:4px; margin-bottom:16px}
@@ -147,7 +147,7 @@
 
   /* nav bar (prototype helper) */
   #devnav{
-    display:flex; border-top:1px solid var(--border); background:#fff;
+    display:flex; border-top:1px solid var(--border); background:#fff; padding-bottom:env(safe-area-inset-bottom,0px);
   }
   #devnav button{
     flex:1; border:none; background:none; padding:11px 4px; font-size:10.5px; color:var(--muted);
@@ -174,12 +174,10 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentUser = null;
 
 function getWeekStartISO(d=new Date()){
-  const day = d.getDay();
-  const diff = (day===0 ? -6 : 1) - day;
-  const monday = new Date(d);
-  monday.setDate(d.getDate()+diff);
-  monday.setHours(0,0,0,0);
-  return monday.toISOString().slice(0,10);
+  const diff = (d.getDay()===0 ? -6 : 1) - d.getDay();
+  const m = new Date(d.getFullYear(), d.getMonth(), d.getDate()+diff);   // 本地時間的週一
+  const p = n => String(n).padStart(2,'0');
+  return `${m.getFullYear()}-${p(m.getMonth()+1)}-${p(m.getDate())}`;     // 不經過 toISOString，避免換成 UTC
 }
 
 async function saveEntry({note=null, species=null, confidence=null}){
@@ -249,12 +247,19 @@ function flowerG(r){
   const petals = [0,72,144,216,288].map(a=>`<circle cy="${-r*0.62}" r="${r*0.5}" fill="#F2C94C" transform="rotate(${a})"/>`).join('');
   return petals + `<circle r="${r*0.28}" fill="#E8A33D"/>`;
 }
-function plantIcon(entry, size=30){
+function plantIcon(entry, size=30, variant='stem'){
+  // variant 'mini'：首頁小 icon，不畫莖（有文字時花直接開在三葉上方）
+  // variant 'stem'：帶莖版本，花莖與葉莖一樣由底部長出
   const id = entry.kind==='id', note = !!(entry.text && entry.text.trim());
-  const stalk = note ? `<path d="M30,42 L30,17" stroke="#6E9153" stroke-width="1.4"/><g transform="translate(30,12)">${flowerG(8)}</g>` : '';
-  return `<svg class="plant-svg" width="${size}" height="${size*1.27}" viewBox="0 0 60 76">
-    <path d="M30,75 Q33,58 30,42" stroke="#6E9153" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-    ${stalk}<g transform="translate(30,42) scale(.7)">${cloverG(id)}</g></svg>`;
+  const clover = `<g transform="translate(30,42) scale(.7)">${cloverG(id)}</g>`;
+  if(variant==='mini'){
+    const flower = note ? `<g transform="translate(30,14)">${flowerG(8)}</g>` : '';
+    return `<svg class="plant-svg" width="${size}" height="${size*68/60}" viewBox="0 3 60 68">${clover}${flower}</svg>`;
+  }
+  const st = d => `<path d="${d}" stroke="#6E9153" stroke-width="1.5" fill="none" stroke-linecap="round"/>`;
+  const stems = st('M30,75 Q33,58 30,42') + (note ? st('M30,75 C38,60 44,40 45,17') : '');
+  const flower = note ? `<g transform="translate(45,13)">${flowerG(8)}</g>` : '';
+  return `<svg class="plant-svg" width="${size}" height="${size*1.27}" viewBox="0 0 60 76">${stems}${clover}${flower}</svg>`;
 }
 function ghostLeafIcon(size=70){
   return `<svg width="${size}" height="${size}" viewBox="-45 -45 90 90">${cloverG(false,true)}</svg>`;
@@ -267,23 +272,28 @@ function weekPlantSVG(entries){
     const t = n===1 ? 0 : (i/(n-1)-.5)*2;
     const a = t*50*Math.PI/180, L = 170 - Math.abs(t)*50;
     const tx = bx+L*Math.sin(a), ty = by-L*Math.cos(a);
-    return {e, t, tx, ty, cx: bx+(tx-bx)*.15, cy: by-L*.6};
+    return {e, t, a, L, tx, ty, cx: bx+(tx-bx)*.15, cy: by-L*.6};
   });
   const flowering = pts.filter(p=>p.e.text && p.e.text.trim());
-  const stems = pts.map(p=>`<path d="M${bx},${by} Q${p.cx},${p.cy} ${p.tx},${p.ty}" stroke="#6E9153" stroke-width="2" fill="none" stroke-linecap="round"/>`).join('');
+  const stem = d => `<path d="${d}" stroke="#6E9153" stroke-width="2" fill="none" stroke-linecap="round"/>`;
+  const stems = pts.map(p=>stem(`M${bx},${by} Q${p.cx},${p.cy} ${p.tx},${p.ty}`)).join('');
   const clovers = pts.map(p=>`<g transform="translate(${p.tx},${p.ty}) rotate(${p.t*30}) scale(1.1)">${cloverG(p.e.kind==='id')}</g>`).join('');
-  let flowers = '';
+  let fStems = '', fHeads = '';
   if(flowering.length===1){
-    flowers = `<path d="M${bx},${by} L${bx},50" stroke="#6E9153" stroke-width="2"/><g transform="translate(${bx},34)">${flowerG(22)}</g>`;
+    // 單朵：大花開在頂端，花莖由底部筆直長出
+    fStems = stem(`M${bx},${by} L${bx},50`);
+    fHeads = `<g transform="translate(${bx},34)">${flowerG(22)}</g>`;
   }else{
-    flowers = flowering.map(p=>{
-      const u=.72, k=1-u;
-      const x = k*k*bx+2*k*u*p.cx+u*u*p.tx, y = k*k*by+2*k*u*p.cy+u*u*p.ty, dx = p.t>=0 ? 16 : -16;
-      return `<path d="M${x},${y} L${x+dx},${y-8}" stroke="#6E9153" stroke-width="1.5"/><g transform="translate(${x+dx},${y-12})">${flowerG(11)}</g>`;
-    }).join('');
+    // 多朵：每朵小花都有自己的花莖由底部長出，比對應的葉子再高一些、略偏向外側
+    flowering.forEach(p=>{
+      const fL = p.L+40, fa = p.a + (p.t<0 ? -.18 : .18);
+      const fx = Math.max(24, Math.min(276, bx+fL*Math.sin(fa))), fy = by-fL*Math.cos(fa);
+      fStems += stem(`M${bx},${by} Q${bx+(fx-bx)*.15},${by-fL*.6} ${fx},${fy}`);
+      fHeads += `<g transform="translate(${fx},${fy})">${flowerG(11)}</g>`;
+    });
   }
   return `<svg class="plant-svg" viewBox="0 0 300 300" width="100%" style="display:block">
-    <ellipse cx="150" cy="212" rx="128" ry="82" fill="#EDE0C8" opacity=".7"/>${stems}${clovers}${flowers}</svg>`;
+    <ellipse cx="150" cy="212" rx="128" ry="82" fill="#EDE0C8" opacity=".7"/>${stems}${fStems}${clovers}${fHeads}</svg>`;
 }
 function treeIcon(size=44){
   return `<svg width="${size}" height="${size}" viewBox="0 0 36 36">
@@ -304,7 +314,7 @@ function currentEntries(){
 
 function miniPlantsHTML(){
   return currentEntries().map((e,idx)=>
-    `<span data-recap-open="${idx}" style="cursor:pointer">${plantIcon(e)}</span>`
+    `<span data-recap-open="${idx}" style="cursor:pointer">${plantIcon(e, 34, 'mini')}</span>`
   ).join('');
 }
 
@@ -313,7 +323,7 @@ let navStack = [];
 const duskViews = new Set(['recap','eveningPlay']);
 
 function goTo(view, opts={}){
-  const rootViews = new Set(['home','gardenNear']);
+  const rootViews = new Set(['home']);//,'gardenNear'
   if(opts.resetStack || rootViews.has(view)){ navStack = []; }
   else{ navStack.push(currentView); }
   currentView = view;
@@ -328,7 +338,7 @@ function goBack(){
 function render(view){
   const isDusk = duskViews.has(view);
   const backBtn = navStack.length ? `
-    <div id="backBtn" style="position:absolute; top:16px; left:16px; z-index:5; width:30px; height:30px;
+    <div id="backBtn" style="position:absolute; top:calc(16px + env(safe-area-inset-top,0px)); left:16px; z-index:5; width:30px; height:30px;
       border-radius:50%; background:${isDusk?'rgba(255,255,255,.14)':'rgba(0,0,0,.06)'};
       display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:17px;
       color:${isDusk?'#F4EEE1':'var(--ink-soft)'}">‹</div>` : '';
@@ -415,18 +425,6 @@ const views = {
       <div class="spacer"></div>
       <p class="small" style="text-align:center; cursor:pointer" data-go="home">先不要，晚點再說</p>
     </div>`,
-  // onboard4: () => `
-  //   <div class="view">
-  //     <p class="eyebrow">4 / 4</p>
-  //     <h1>留住這段旅程</h1>
-  //     <p class="small" style="margin-bottom:16px">建立帳號，幫你保存往後累積的花圃與紀錄</p>
-  //     <button class="btn ghost block" data-oauth="google">使用 Google 繼續</button>
-  //     <button class="btn ghost block" data-oauth="facebook">使用 Facebook 繼續</button>
-  //     <input id="emailInput" type="email" placeholder="你的電子郵件" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; font-size:13px; margin-bottom:8px; font-family:inherit">
-  //     <button class="btn block" id="emailLoginBtn">完成註冊</button>
-  //     <div class="spacer"></div>
-  //     <p class="small" style="text-align:center; cursor:pointer" data-go="home">先不要，晚點再說</p>
-  //   </div>`,
 
   home: () => {
     const isEve = state.timeOfDay==='evening';
@@ -608,33 +606,6 @@ function bind(view){
     screenEl.querySelector('#signUpBtn').onclick = e => run(e.currentTarget, 'up');
     screenEl.querySelector('#signInBtn').onclick = e => run(e.currentTarget, 'in');
   }
-  // if(view==='onboard4'){
-  //   screenEl.querySelectorAll('[data-oauth]').forEach(el=>{
-  //     el.onclick = async ()=>{
-  //       const { error } = await sb.auth.signInWithOAuth({ provider: el.dataset.oauth, options:{ redirectTo: location.origin + location.pathname } });
-  //       if(error) alert('這個登入方式還沒在 Supabase 後台啟用 provider，請先設定，或改用 Email 登入。');
-  //     };
-  //   });
-  //   const emailBtn = screenEl.querySelector('#emailLoginBtn');
-  //   if(emailBtn){
-  //     emailBtn.onclick = async ()=>{
-  //       const email = screenEl.querySelector('#emailInput').value.trim();
-  //       if(!email){ alert('請輸入電子郵件'); return; }
-  //       emailBtn.textContent = '傳送中...';
-  //       emailBtn.disabled = true;
-  //       try{
-  //         const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.origin + location.pathname } });
-  //         if(error){ alert('發送失敗：'+error.message); }
-  //         else{ alert('登入連結已寄出，請到信箱點擊完成註冊。'); }
-  //       }catch(err){
-  //         alert('發生錯誤，可能是網路或 CORS 問題：'+err.message);
-  //       }finally{
-  //         emailBtn.textContent = '完成註冊';
-  //         emailBtn.disabled = false;
-  //       }
-  //     };
-  //   }
-  // }
   const saveBtn = screenEl.querySelector('#saveBtn');
   if(saveBtn){
     saveBtn.onclick = async ()=>{
@@ -738,16 +709,6 @@ if('serviceWorker' in navigator && !['localhost','127.0.0.1'].includes(location.
     if(event === 'SIGNED_OUT'){ goTo('onboard1', {resetStack:true}); }
   });
 })();
-// (async ()=>{
-//   const { data } = await sb.auth.getSession();
-//   currentUser = data.session?.user ?? null;
-//   if(currentUser){ await loadWeekEntries(); }
-//   sb.auth.onAuthStateChange(async (_event, session)=>{
-//     currentUser = session?.user ?? null;
-//     if(currentUser){ await loadWeekEntries(); render(currentView); }
-//   });
-//   render(currentUser ? 'home' : 'onboard1');
-// })();
 </script>
 </body>
 </html>
