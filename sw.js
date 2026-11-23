@@ -1,6 +1,6 @@
 // Naturibum service worker — 讓 App 能安裝、離線可開啟
 // 改了 index.html 或其他靜態檔之後，把 VERSION 加一，舊快取就會被清掉
-const VERSION = 'naturibum-v2';
+const VERSION = 'naturibum-v3';
 const SHELL = [
   './', './index.html', './manifest.json',
   './vendor/supabase.js',
@@ -8,7 +8,10 @@ const SHELL = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)));
+  // 逐一快取；某個檔案不存在（404）時只跳過它，不讓整個 Service Worker 安裝失敗
+  e.waitUntil(caches.open(VERSION).then(c =>
+    Promise.all(SHELL.map(u => c.add(u).catch(err => console.warn('略過快取：', u, err))))
+  ));
   self.skipWaiting();
 });
 

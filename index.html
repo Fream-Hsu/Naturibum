@@ -907,7 +907,17 @@ async function enablePush(){
   if(VAPID_PUBLIC_KEY.startsWith('PASTE'))
     return {ok:false, reason:'index.html 裡還沒填 VAPID 公鑰'};
   if(Notification.permission !== 'granted') return {ok:false, reason:'通知權限未開啟（' + Notification.permission + '）'};
-  const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((_,rej)=>setTimeout(()=>rej(new Error('Service Worker 逾時')), 6000))]);
+  let reg = await navigator.serviceWorker.getRegistration();
+  if(!reg) reg = await navigator.serviceWorker.register('sw.js');
+  const swState = () => reg.active ? '已啟用' : reg.waiting ? '等待中（waiting）' : reg.installing ? '安裝中（installing）' : '沒有 Service Worker';
+  if(!reg.active){
+    // 等最多 8 秒；仍沒有啟用，就回報目前狀態，方便判斷是安裝失敗還是只是太慢
+    await new Promise(res=>{
+      const t = setTimeout(res, 8000);
+      navigator.serviceWorker.ready.then(()=>{ clearTimeout(t); res(); });
+    });
+    if(!reg.active) throw new Error('Service Worker 還沒啟用，目前狀態：' + swState());
+  }
   let sub = await reg.pushManager.getSubscription();
   if(!sub) sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY)});
   const j = sub.toJSON();
