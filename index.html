@@ -117,6 +117,13 @@
   /* —— 對齊 Figma（frames 5 / 8 / 9 / 10）—— */
   #backBtn + .view .eyebrow{padding-left:36px}
   .plant-svg{filter:drop-shadow(1px 2px 1.5px rgba(61,46,26,.22))}
+  .more-row{display:flex; align-items:center; justify-content:center; gap:14px; margin-top:16px; align-self:center}
+  .mini-btn{width:42px; height:42px; border-radius:50%; background:var(--cream); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; cursor:pointer}
+  .mini-btn svg{pointer-events:none}
+  .more-row .side{display:none}
+  .more-row.open .side{display:flex}
+  .plant-block{display:inline-flex; align-items:flex-end; flex-shrink:0; cursor:pointer; padding:2px}
+  .plant-block svg{pointer-events:none; display:block; overflow:visible}
   .invite-card{
     position:relative; min-height:176px; background:var(--cream); border-radius:18px; padding:18px 18px 16px;
     display:flex; flex-direction:column; justify-content:space-between;
@@ -160,6 +167,7 @@
 <body>
 <div id="phone">
   <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none">
+  <input type="file" id="uploadInput" accept="image/*" multiple style="display:none">
   <div id="screen"></div>
   <div id="devnav"></div>
   <div id="overlay"></div>
@@ -212,16 +220,26 @@ async function loadWeekEntries(){
   }
 }
 
-const DEV = ['localhost','127.0.0.1'].includes(location.hostname) || new URLSearchParams(location.search).has('dev');
+const DEV = (()=>{
+  try{
+    const q = new URLSearchParams(location.search).get('dev');
+    if(q==='1') localStorage.setItem('nb_dev','1');
+    if(q==='0') localStorage.removeItem('nb_dev');
+    return ['localhost','127.0.0.1'].includes(location.hostname) || localStorage.getItem('nb_dev')==='1';
+  }catch(_){ return ['localhost','127.0.0.1'].includes(location.hostname); }
+})();
 const $ = sel => document.querySelector(sel);
 const screenEl = $('#screen');
 const devnavEl = $('#devnav');
+
+const WEEKEND_FEATURE_READY = false;   // 週末活動功能做好後改成 true：onboard3 會顯示開關，預設開啟
 
 let state = {
   onboardDone: false,
   timeOfDay: 'morning',
   routine: {leave:null, off:null, age:null},
-  perms: {location:false, weekend:true},
+  perms: {location:false, weekend:WEEKEND_FEATURE_READY, push:true},
+  region: null, dirty: false, profile: null,
   photos: [],
   eveningDuration: null,
 };
@@ -232,8 +250,145 @@ const demoEntries = [
   {id:3, kind:'plain', text:'', photos:1},
 ];
 
+// ================= C：每日邀請文案（固定 ID）=================
+// 大字：30 句「出門前、預設」依日期輪替；小字：天氣型態 / 區域 / 節氣 三層合併挑一句，沒有符合就不顯示
+const DAILY_LINES = [
+  ['d01','出門前，留意一下腳邊，看看有沒有綠色在那裡。'],
+  ['d02','走出門的那一刻，先深呼吸，看看天空遼闊吧。'],
+  ['d03','踏出家門時，今天的風是什麼味道呢？'],
+  ['d04','路上，找一個你沒注意過的地方，多看一眼吧。'],
+  ['d05','出門後的第一個轉角，聽聽有什麼聲音。'],
+  ['d06','慢一點走，看看路邊最近的一片葉子。'],
+  ['d07','關上門，停留一下，看看你的家。'],
+  ['d08','今天的光，感覺起來如何？'],
+  ['d09','出門的路上，選一個你想慢下來的地方。'],
+  ['d10','踏出門口，留意一下，腳下傳回來的觸感如何？'],
+  ['d11','聽聽附近有哪些聲音，是否有自然的聲音？'],
+  ['d12','眺望遠方，今天的能見度如何？'],
+  ['d13','路過一處綠色時，多停留一下。'],
+  ['d14','看看路邊一片葉子，邊緣長得如何？'],
+  ['d15','今天，把頭抬高一點，換個視角看看你熟悉的路。'],
+  ['d16','走出去的第一步，留意今天風吹來的感覺。'],
+  ['d17','留意一下，光線灑落下來的地方。'],
+  ['d18','讓視線落在遠一點的地方。'],
+  ['d19','今天有什麼特別的聲音嗎？'],
+  ['d20','門外有什麼，是你每天經過、還沒細看過的？'],
+  ['d21','今天，回想一個自然的畫面出門吧。'],
+  ['d22','看看平常不太會抬頭、或不太會低頭看的地方。'],
+  ['d23','留意風有沒有帶來什麼氣味。'],
+  ['d24','走出門口，先站著看看四周，這是你的家。'],
+  ['d25','路邊的牆角、縫隙，看看有什麼在那裡。'],
+  ['d26','看看今天的顏色，哪一種最多。'],
+  ['d27','看看路邊的綠，深淺有什麼不同。'],
+  ['d28','帶著一點好奇，出門吧。'],
+  ['d29','今天的路上，選一個轉角停一下。'],
+  ['d30','讓腳步慢半拍，看看路邊。'],
+];
+
+const WEATHER_LABELS = {rain:'雨', hot:'熱', cold:'冷', wind:'風', clear:'晴', cloudy:'陰', severe:'颱風/豪雨'};
+const WEATHER_LINES = {
+  rain:[['rain1','空氣裡的濕度，聞聞看有什麼味道？'],['rain2','聽聽看，雨或濕氣讓周圍的聲音有什麼不同。'],['rain3','樹皮和石頭的顏色，在潮濕的日子裡，看起來有什麼變化？']],
+  hot:[['hot1','留意一下，陽光落在皮膚上的感覺。'],['hot2','找一處樹蔭，站進去，感受溫度的落差。'],['hot3','熱的日子裡，看看路邊的葉子，是舒展還是微微捲起？']],
+  cold:[['cold1','吸一口氣，今天的空氣涼到什麼程度？'],['cold2','留意一下，呼出來的氣、手指的溫度。'],['cold3','冷的早晨，看看草葉或欄杆上，有沒有一層薄薄的水氣？']],
+  wind:[['wind1','風從哪個方向來？站著感受一下。'],['wind2','看看風吹過的地方，什麼在動、什麼不動？'],['wind3','聽聽風穿過樹葉的聲音，有幾階段？']],
+  clear:[['clear1','今天的光，把影子拉得多長？'],['clear2','抬頭看看天空，今天是什麼樣的顏色？'],['clear3','光線灑下來的地方，顏色和陰影裡有什麼不同？']],
+  cloudy:[['cloudy1','沒有直射的光，今天的顏色看起來如何？'],['cloudy2','看看遠處，能看到多遠？'],['cloudy3','陰天裡，哪些顏色反而特別清楚？']],
+};
+const SEVERE_LINE = '颱風/豪雨期間，也請聆聽周邊聲響，注意自身安全。';
+
+// 區域：north 北部 / central 中部 / south 南部 / east 東部（含宜蘭）/ island 離島
+const REGIONS = [['north','北部'],['central','中部'],['south','南部'],['east','東部'],['island','離島']];
+const WINTER=[12,1,2], SPRING=[3,4,5], SUMMER=[6,7,8];
+const REGION_LINES = [
+  {id:'r01', regions:['north'], months:WINTER, weathers:['rain','cold'], t:'今天的東北季風，帶給你的是什麼感受？'},
+  {id:'r02', regions:['north'], months:SPRING, weathers:['rain'], t:'春天的雨後，牆角和樹幹上，有什麼顏色變得更明顯？'},
+  {id:'r03', regions:['north'], months:WINTER, weathers:['cloudy'], t:'雲壓得低的日子，遠處的山，還看得見多少輪廓？'},
+  {id:'r04', regions:['central'], months:[10,11,12,1,2], weathers:null, t:'清晨出門，遠處的景物，看得清楚嗎？'},
+  {id:'r05', regions:['south'], months:WINTER, weathers:['clear'], t:'冬天的陽光依然明亮，影子的邊緣是否清晰可辨？'},
+  {id:'r06', regions:['central','south'], months:SUMMER, weathers:['hot'], t:'午後雲的樣子，從哪個方向堆起來？'},
+  {id:'r07', regions:['east'], months:null, weathers:['clear','cloudy'], t:'山和海，今天哪一邊的顏色更明亮？'},
+  {id:'r08', regions:['east'], months:[6,7,8,9,10,11], weathers:['wind'], t:'風從海的方向來，還是從山的方向來？'},
+  {id:'r09', regions:['island'], months:null, weathers:['wind'], t:'留意一下，這裡的樹，樹冠偏向哪一邊？'},
+  {id:'r10', regions:['island'], months:SPRING, weathers:['cloudy'], t:'霧來的時候，周圍的聲音聽起來有什麼不同？'},
+];
+
+// 節氣：[月, 日, ID, 文案, 適用天氣（null = 不限）]。日期為概略值，每年約差一天
+// ※ 適用天氣標籤是我先擬的，請你審過
+const SOLAR_TERMS = [
+  [1,5,'s_xh','今天的早晨，開始感受到冷意了嗎？',null],
+  [1,20,'s_dh','今天的冷，是濕冷還是乾冷？',null],
+  [2,4,'s_lc','留意一下，傍晚的天色，是不是亮得比前陣子久一些？',['clear','cloudy']],
+  [2,19,'s_ys','留意一下，空氣裡的水氣，和前一陣子有什麼不同？',null],
+  [3,5,'s_jz','聽聽看，附近有沒有開始新出現的聲音？',null],
+  [3,20,'s_cf','今天白天和黑夜幾乎一樣長，留意天色變暗的時刻。',['clear','cloudy']],
+  [4,5,'s_qm','留意一下，空氣和地面，開始有一點潮濕的感覺嗎？',null],
+  [4,20,'s_gy','新長出來的嫩葉，顏色和老葉有什麼不同？',null],
+  [5,5,'s_lx','留意一下，今天的氣溫，比前陣子高了多少？',null],
+  [5,21,'s_xm','降雨前或雨停後，空氣的味道有什麼不同？',['rain','cloudy']],
+  [6,5,'s_mz','路邊的草，高度和前陣子比起來有什麼不同？',null],
+  [6,21,'s_xz','正午時，看看你的影子有多短。',['clear']],
+  [7,7,'s_xs','聽聽看，夏天的聲音，今天有幾種？',null],
+  [7,22,'s_ds','最熱的時候，看看哪些地方先涼下來。',['hot','clear']],
+  [8,7,'s_lq','天氣還很熱，但留意一下，光線和一個月前有什麼不同？',['clear','cloudy','hot']],
+  [8,23,'s_cs','傍晚的風，有沒有比白天涼一點？',null],
+  [9,7,'s_bl','清晨的草葉上，開始有水珠了嗎？',null],
+  [9,23,'s_qf','白天和黑夜今天幾乎一樣長，比較一下早晨和傍晚的光。',['clear','cloudy']],
+  [10,8,'s_hl','留意一下，風的方向和質感，有沒有變？',null],
+  [10,23,'s_sj','早晨出門，空氣的溫度和氣味，和一個月前有什麼不同？',null],
+  [11,7,'s_ld','路邊的葉子，有沒有哪一片，顏色開始不一樣了？',null],
+  [11,22,'s_xx','留意一下，光線是不是低了，影子是不是更長了？',['clear']],
+  [12,7,'s_dx','看看陰影的位置，和夏天比起來有什麼不同？',['clear']],
+  [12,21,'s_dz','今天是一年中夜晚最長的日子，留意傍晚天色變暗的時間。',null],
+];
+
+const devOverride = {weather:null, date:null};   // 開發測試：手動指定天氣 / 日期
+function invDate(){
+  if(devOverride.date){ const [y,m,d] = devOverride.date.split('-').map(Number); return {y, m, d}; }
+  const n = new Date(); return {y:n.getFullYear(), m:n.getMonth()+1, d:n.getDate()};
+}
+function seededRand(n){
+  let x = (n ^ 0x9e3779b9) >>> 0;
+  x = Math.imul(x ^ (x>>>16), 0x85ebca6b); x = Math.imul(x ^ (x>>>13), 0xc2b2ae35); x ^= x>>>16;
+  return (x>>>0)/4294967296;
+}
+function currentSolarTerm(m, d){
+  let cur = SOLAR_TERMS[SOLAR_TERMS.length-1];       // 一月初之前，沿用前一年的冬至
+  for(const t of SOLAR_TERMS){ if(t[0]<m || (t[0]===m && t[1]<=d)) cur = t; }
+  return cur;
+}
+// 一天一句、同一天內固定；三層合併的加權抽選（區域句符合時權重最高，節氣句不會被區域句擠掉）
+function todayInvitation(){
+  const {y,m,d} = invDate();
+  const dayNum = Math.floor(Date.UTC(y, m-1, d)/86400000);
+  const w = devOverride.weather || null;
+  if(w==='severe') return {main: SEVERE_LINE, sub: null, ids:['severe']};
+  const daily = DAILY_LINES[((dayNum % DAILY_LINES.length)+DAILY_LINES.length) % DAILY_LINES.length];
+  const pool = [];
+  if(w && WEATHER_LINES[w]) WEATHER_LINES[w].forEach(([id,t])=> pool.push({id, t, wt:1}));
+  REGION_LINES.forEach(r=>{
+    if(state.region && r.regions.includes(state.region)
+       && (!r.months || r.months.includes(m)) && (!r.weathers || !w || r.weathers.includes(w)))
+      pool.push({id:r.id, t:r.t, wt:3});
+  });
+  const st = currentSolarTerm(m, d);
+  if(!st[4] || (w && st[4].includes(w))) pool.push({id:st[2], t:st[3], wt:2});
+  let sub = null;
+  if(pool.length){
+    const total = pool.reduce((s,p)=>s+p.wt, 0);
+    let r = seededRand(dayNum + 7919) * total;
+    for(const p of pool){ r -= p.wt; if(r < 0){ sub = p; break; } }
+    sub = sub || pool[pool.length-1];
+  }
+  return {main: daily[1], sub: sub ? sub.t : null, ids:[daily[0], sub ? sub.id : null]};
+}
+
 // ---- 花圃 SVG 插畫：酢漿草三葉（俯視）。一則紀錄 = 一株三葉；辨識過帶葉脈；寫了文字才開花 ----
 const CAM_SVG = `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#3D4A32" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
+const ico = inner => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3D4A32" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const DOTS_SVG = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13 12C13 12.5523 12.5523 13 12 13C11.4477 13 11 12.5523 11 12C11 11.4477 11.4477 11 12 11C12.5523 11 13 11.4477 13 12Z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="#3D4A32"/><path d="M20 12C20 12.5523 19.5523 13 19 13C18.4477 13 18 12.5523 18 12C18 11.4477 18.4477 11 19 11C19.5523 11 20 11.4477 20 12Z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="#3D4A32"/><path d="M6 12C6 12.5523 5.55228 13 5 13C4.44772 13 4 12.5523 4 12C4 11.4477 4.44772 11 5 11C5.55228 11 6 11.4477 6 12Z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="#3D4A32"/></svg>`;
+const UPLOAD_SVG = `<svg width="30" height="30" viewBox="0 0 50 50" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M45.8334 25C45.8334 34.8208 45.8334 39.7314 42.7823 42.7822C39.7315 45.8333 34.8209 45.8333 25 45.8333C15.1791 45.8333 10.2686 45.8333 7.21767 42.7822C4.16669 39.7314 4.16669 34.8208 4.16669 25C4.16669 15.179 4.16669 10.2686 7.21767 7.2176C10.2686 4.16663 15.1791 4.16663 25 4.16663" stroke-width="1.5" stroke-linecap="round" stroke="#3D4A32"/><path d="M4.16669 26.0419L7.81583 22.849C9.71431 21.1879 12.5756 21.2831 14.3594 23.0669L23.2963 32.0037C24.7279 33.4356 26.9817 33.6308 28.6384 32.4665L29.2596 32.03C31.6434 30.3546 34.8686 30.5487 37.0344 32.4979L43.75 38.5419" stroke-width="1.5" stroke-linecap="round" stroke="#3D4A32"/><path d="M35.4167 4.16663V22.9166M29.1667 10.4166L35.4167 4.16663L41.6667 10.4166" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#3D4A32"/></svg>`;
+const USER_SVG = `<svg width="30" height="30" viewBox="0 0 50 50" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M41.6667 43.75V39.5833C41.6667 37.3732 40.7887 35.2536 39.2259 33.6908C37.6631 32.128 35.5435 31.25 33.3333 31.25H16.6667C14.4565 31.25 12.3369 32.128 10.7741 33.6908C9.21132 35.2536 8.33334 37.3732 8.33334 39.5833V43.75" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="#3D4A32"/><path d="M33.3333 14.5833C33.3333 19.1857 29.6024 22.9167 25 22.9167C20.3976 22.9167 16.6667 19.1857 16.6667 14.5833C16.6667 9.98096 20.3976 6.25 25 6.25C29.6024 6.25 33.3333 9.98096 33.3333 14.5833Z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="#3D4A32"/></svg>`;
+const CAM_SMALL_SVG = ico('<path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>');
 const CHEV = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#8A8570" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l5-4 5 4M3 12l5-4 5 4"/></svg>`;
 const LEAF_L = 'M0,0 C-17,-9 -24,-24 -13,-35 Q-4,-39 0,-32 Q4,-16 0,0Z';
 const LEAF_R = 'M0,0 Q4,-16 0,-32 Q4,-39 13,-35 C24,-24 17,-9 0,0Z';
@@ -243,9 +398,13 @@ function cloverG(identified, ghost=false){
   const l = ghost ? line : 'fill="#8FAE72"', r = ghost ? line : 'fill="#819D67"';
   return [-60,60,180].map(a=>`<g transform="rotate(${a})"><path d="${LEAF_L}" ${l}/><path d="${LEAF_R}" ${r}/>${vein}</g>`).join('');
 }
+// 花頭來自 Figma 的 Oxalis_flower.svg（五瓣＋花心；原檔的莖與灰色陰影層不用）。
+// flowerG(r) 的 r 沿用舊定義：花瓣外緣半徑 ≈ 1.12r，所以呼叫端不必改
+const FLOWER_HEAD = `<path d="M44.3197 44.4302C42.0665 41.0251 39.2426 35.9125 37.5304 30.7903C33.5849 24.5459 39.1032 19.9314 42.438 19.9023C43.5457 19.436 44.1015 19.4311 44.1015 19.4311L44.3197 44.4302Z" fill="#FECD4F"/><path d="M44.1015 19.4311C44.1015 19.4311 44.7268 19.4257 45.9813 19.8714C49.7331 19.8386 56.0258 24.3501 51.7035 30.6666C49.8725 35.8198 46.7909 40.9838 44.3196 44.4302L44.1015 19.4311Z" fill="#F4AF01"/><path opacity="0.5" d="M44.3022 42.4303L44.1189 21.4311" stroke-linecap="round" stroke="#C79130"/><path d="M44.3176 44.647C46.5119 41.2037 50.0338 36.5445 54.0168 32.8969C58.1165 26.7527 64.5766 29.917 65.9596 32.9517C66.8361 33.7739 67.0666 34.2797 67.0666 34.2797L44.3176 44.647Z" fill="#FECD4F"/><path d="M67.0666 34.2797C67.0666 34.2797 67.3259 34.8487 67.429 36.1761C68.9849 39.5901 67.4229 47.1738 59.8945 45.7944C54.4421 46.2176 48.4711 45.5029 44.3175 44.647L67.0666 34.2797Z" fill="#F4AF01"/><path opacity="0.5" d="M46.1375 43.8176L65.2467 35.1091" stroke-linecap="round" stroke="#C79130"/><path d="M44.2014 44.1459C48.0953 45.3743 53.5073 47.5703 58.0615 50.4735C65.0574 52.8433 63.6729 59.9022 61.0996 62.0235C60.5322 63.083 60.1033 63.4365 60.1033 63.4365L44.2014 44.1459Z" fill="#FECD4F"/><path d="M60.1033 63.4365C60.1033 63.4365 59.6208 63.8343 58.3654 64.2774C55.4703 66.6639 47.7408 67.118 47.1247 59.4891C45.3047 54.332 44.4497 48.3795 44.2014 44.1459L60.1033 63.4365Z" fill="#F4AF01"/><path opacity="0.5" d="M45.4735 45.6892L58.8312 61.8933" stroke-linecap="round" stroke="#C79130"/><path d="M44.4151 44.782C43.9523 48.8388 42.8292 54.5703 40.8484 59.5948C39.857 66.9144 32.6636 66.9022 30.0903 64.7809C28.942 64.4262 28.5131 64.0726 28.5131 64.0726L44.4151 44.782Z" fill="#FECD4F"/><path d="M28.5131 64.0726C28.5131 64.0726 28.0306 63.6749 27.3561 62.527C24.461 60.1406 22.5405 52.6397 29.9116 50.5792C34.6267 47.8087 40.3067 45.8336 44.4151 44.782L28.5131 64.0726Z" fill="#F4AF01"/><path opacity="0.5" d="M43.1429 46.3252L29.7853 62.5294" stroke-linecap="round" stroke="#C79130"/><path d="M44.3176 44.6959C40.2793 45.2989 34.4523 45.6975 29.0863 45.0846C21.7596 46.0215 19.9095 39.07 21.2925 36.0353C21.338 34.8344 21.5685 34.3286 21.5685 34.3286L44.3176 44.6959Z" fill="#FECD4F"/><path d="M21.5685 34.3286C21.5685 34.3286 21.8278 33.7596 22.762 32.8109C24.3178 29.3969 31.066 25.6004 34.9641 32.1871C38.8606 36.0244 42.2385 40.9997 44.3175 44.6959L21.5685 34.3286Z" fill="#F4AF01"/><path opacity="0.5" d="M42.4976 43.8666L23.3884 35.158" stroke-linecap="round" stroke="#C79130"/><circle cx="44.1189" cy="44.9303" r="2.5" fill="#F4B13D"/><circle cx="44.1189" cy="44.9303" r="1.5" fill="#FFDF7F"/>`;
+const FLOWER_CX = 44.1189, FLOWER_CY = 44.9303, FLOWER_REXT = 25.5;   // 花頭中心與最遠花瓣距離（原檔座標）
 function flowerG(r){
-  const petals = [0,72,144,216,288].map(a=>`<circle cy="${-r*0.62}" r="${r*0.5}" fill="#F2C94C" transform="rotate(${a})"/>`).join('');
-  return petals + `<circle r="${r*0.28}" fill="#E8A33D"/>`;
+  const k = (1.12*r)/FLOWER_REXT;
+  return `<g transform="scale(${k}) translate(${-FLOWER_CX},${-FLOWER_CY})">${FLOWER_HEAD}</g>`;
 }
 function plantIcon(entry, size=30, variant='stem'){
   // variant 'mini'：首頁小 icon，不畫莖（有文字時花直接開在三葉上方）
@@ -253,8 +412,14 @@ function plantIcon(entry, size=30, variant='stem'){
   const id = entry.kind==='id', note = !!(entry.text && entry.text.trim());
   const clover = `<g transform="translate(30,42) scale(.7)">${cloverG(id)}</g>`;
   if(variant==='mini'){
-    const flower = note ? `<g transform="translate(30,14)">${flowerG(8)}</g>` : '';
-    return `<svg class="plant-svg" width="${size}" height="${size*68/60}" viewBox="0 3 60 68">${clover}${flower}</svg>`;
+    // 以 px 為座標；size = 葉組直徑（原本約 51px，維持不變）。花直徑 = 葉組直徑 × MINI_FLOWER_RATIO
+    const MINI_FLOWER_RATIO = 0.8;
+    const R = size/2, s = R/39, fr = (MINI_FLOWER_RATIO*size/2)/1.12;   // 花瓣外緣約 1.12r
+    const c = `<g transform="translate(${R},${R}) scale(${s})">${cloverG(id)}</g>`;
+    if(!note) return `<svg class="plant-svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${c}</svg>`;
+    // 葉在左上、花沿對角線在右下，兩者重疊；花畫在後面 = 疊在最上層
+    const fc = R + size*0.47, W = fc + MINI_FLOWER_RATIO*size/2;
+    return `<svg class="plant-svg" width="${W}" height="${W}" viewBox="0 0 ${W} ${W}">${c}<g transform="translate(${fc},${fc})">${flowerG(fr)}</g></svg>`;
   }
   const st = d => `<path d="${d}" stroke="#6E9153" stroke-width="1.5" fill="none" stroke-linecap="round"/>`;
   const stems = st('M30,75 Q33,58 30,42') + (note ? st('M30,75 C38,60 44,40 45,17') : '');
@@ -314,7 +479,7 @@ function currentEntries(){
 
 function miniPlantsHTML(){
   return currentEntries().map((e,idx)=>
-    `<span data-recap-open="${idx}" style="cursor:pointer">${plantIcon(e, 56, 'mini')}</span>`
+    `<span class="plant-block" data-recap-open="${idx}">${plantIcon(e, 51, 'mini')}</span>`
   ).join('');
 }
 
@@ -353,7 +518,7 @@ function renderDevNav(current){
   const tabs = [ ['onboard1','註冊'], ['home','首頁'], ['gardenNear','花圃'] ];
   devnavEl.innerHTML = tabs.map(([k,label]) =>
     `<button data-jump="${k}" class="${current.startsWith(k.replace(/[0-9]/g,''))?'active':''}">${label}</button>`
-  ).join('') + `<button id="todToggle" title="開發用:模擬系統時段切換">${state.timeOfDay==='evening'?'🌙 傍晚模式':'🌞 早晨模式'}</button>`;
+  ).join('') + `<button id="devTest">🧪 測試</button><button id="todToggle" title="開發用:模擬系統時段切換">${state.timeOfDay==='evening'?'🌙 傍晚模式':'🌞 早晨模式'}</button>`;
   devnavEl.querySelectorAll('button[data-jump]').forEach(b=>{
     b.onclick = ()=> goTo(b.dataset.jump, {resetStack:true});
   });
@@ -361,6 +526,7 @@ function renderDevNav(current){
     state.timeOfDay = state.timeOfDay==='evening' ? 'morning' : 'evening';
     goTo('home', {resetStack:true});
   };
+  document.getElementById('devTest').onclick = openDevPanel;
 }
 
 const views = {
@@ -400,17 +566,22 @@ const views = {
   onboard3: () => `
     <div class="view">
       <p class="eyebrow">3 / 4</p>
-      <h1>還有兩件小事</h1>
-      <div class="toggle-row">
-        <div><div class="label">位置權限</div><div class="sub">只用來判斷你是否正在移動，不會被記錄或分享</div></div>
-        <div class="switch ${state.perms.location?'on':'off'}" data-toggle="location"><div class="knob"></div></div>
+      <h1>還有幾件小事</h1>
+      <p class="small" style="margin-bottom:8px">你大概在哪一帶？（選填）</p>
+      <div class="chip-row" data-group="region" style="margin-bottom:6px">
+        ${REGIONS.map(([k,v])=>`<span class="chip ${state.region===k?'active':''}" data-val="${k}">${v}</span>`).join('')}
       </div>
+      <p class="small" style="margin:0 0 22px; color:var(--muted-light); font-size:11px">只用來挑選合適你位置氣候的邀請語。</p>
       <div class="toggle-row">
+        <div><div class="label">出門前的提醒</div><div class="sub">只在你出門前的時段，輕輕遞一句話；週末不打擾</div></div>
+        <div class="switch ${state.perms.push?'on':'off'}" data-toggle="push"><div class="knob"></div></div>
+      </div>
+      ${WEEKEND_FEATURE_READY ? `<div class="toggle-row">
         <div><div class="label">週末活動邀請</div><div class="sub">收到深一點的自然活動邀請</div></div>
         <div class="switch ${state.perms.weekend?'on':'off'}" data-toggle="weekend"><div class="knob"></div></div>
-      </div>
+      </div>` : ''}
       <div class="spacer"></div>
-      <button class="btn" data-go="onboard4">繼續</button>
+      <button class="btn" id="onb3Next">繼續</button>
     </div>`,
 
     onboard4: () => `
@@ -428,17 +599,24 @@ const views = {
 
   home: () => {
     const isEve = state.timeOfDay==='evening';
+    const inv = isEve ? null : todayInvitation();
     return `
     <div class="view" style="${isEve?'background:var(--cream-dusk); margin:-1.5rem -1.25rem; padding:1.5rem 1.25rem;':''}">
       <div class="invite-card">
         <span class="invite-ghost">${ghostLeafIcon(64)}</span>
         <p class="eyebrow" style="margin:0">${isEve?'今天的邀請 · 傍晚':'今天的邀請'}</p>
-        <h1>${isEve?'下班了，讓自己慢下來，找回自己。':'出門前，留意一下腳邊。'}</h1>
-        <p class="small" style="margin:0">${isEve?'想讓自然的聲音，陪你走一段路。':'今天陰有雨，樹皮上的地衣特別鮮明，看一眼吧。'}</p>
+        <h1>${isEve?'下班了，讓自己慢下來，找回自己。':inv.main}</h1>
+        ${isEve ? '<p class="small" style="margin:0">想讓自然的聲音，陪你走一段路。</p>'
+                : `<p class="small" style="margin:0; min-height:1.7em">${inv.sub || ''}</p>`}
       </div>
       <div class="spacer"></div>
       <div class="cam-circle big" ${isEve?'data-go="eveningDuration"':'data-camera-trigger="1"'}>${isEve?'🎧':CAM_SVG}</div>
       ${isEve?'<p class="small" style="text-align:center;margin-top:10px">點一下，讓音景陪你走一段</p>':''}
+      <div class="more-row" id="moreRow">
+        <div class="mini-btn side" ${isEve?'data-camera-trigger="1" aria-label="拍照"':'data-upload-trigger="1" aria-label="上傳圖片"'}>${isEve?CAM_SMALL_SVG:UPLOAD_SVG}</div>
+        <div class="mini-btn" id="moreToggle" role="button" aria-label="更多">${DOTS_SVG}</div>
+        <div class="mini-btn side" data-profile="1" aria-label="個人">${USER_SVG}</div>
+      </div>
       <div class="spacer"></div>
       <div class="week-head"><span>這週的觀察</span><span data-go="gardenNear" style="cursor:pointer">更多...</span></div>
       <div class="week-card">${miniPlantsHTML()}</div>
@@ -563,6 +741,21 @@ function bind(view){
       finishBtn.onclick = ()=>{ state.timeOfDay='morning'; goTo('home', {resetStack:true}); };
     }
   }
+  screenEl.querySelectorAll('[data-upload-trigger]').forEach(el=>{
+    el.onclick = ()=> document.getElementById('uploadInput').click();
+  });
+  const moreToggle = screenEl.querySelector('#moreToggle');
+  if(moreToggle){ moreToggle.onclick = ()=> screenEl.querySelector('#moreRow').classList.toggle('open'); }
+  screenEl.querySelectorAll('[data-profile]').forEach(el=>{
+    el.onclick = ()=>{
+      overlayEl.innerHTML = `<div style="background:var(--paper); border-radius:18px; padding:22px; color:var(--ink)">
+        <div style="display:flex; justify-content:space-between; margin-bottom:10px"><b>個人</b><span id="profClose" style="cursor:pointer; font-size:20px; line-height:1">×</span></div>
+        <p class="small" style="margin:0">這一頁還在規劃中。</p></div>`;
+      overlayEl.style.display = 'flex';
+      overlayEl.onclick = e=>{ if(e.target===overlayEl) closeRecap(); };
+      overlayEl.querySelector('#profClose').onclick = closeRecap;
+    };
+  });
   screenEl.querySelectorAll('[data-camera-trigger]').forEach(el=>{
     el.onclick = ()=> document.getElementById('cameraInput').click();
   });
@@ -570,6 +763,7 @@ function bind(view){
     el.onclick = ()=>{
       const key = el.dataset.toggle;
       state.perms[key] = !state.perms[key];
+      state.dirty = true;
       render(view);
     };
   });
@@ -581,11 +775,22 @@ function bind(view){
         if(g==='leave') state.routine.leave = val;
         if(g==='off') state.routine.off = val;
         if(g==='age') state.routine.age = val;
+        if(g==='region') state.region = (state.region===val ? null : val);
+        if(g!=='duration') state.dirty = true;
         if(g==='duration') state.eveningDuration = val;
         render(view);
       };
     });
   });
+  if(view==='onboard3'){
+    screenEl.querySelector('#onb3Next').onclick = async ()=>{
+      // 通知權限必須在點擊當下要求（iOS 要求使用者手勢）
+      if(state.perms.push && 'Notification' in window && Notification.permission==='default'){
+        try{ await Notification.requestPermission(); }catch(_){}
+      }
+      goTo('onboard4');
+    };
+  }
   if(view==='onboard4'){
     const emailEl = screenEl.querySelector('#emailInput');
     const pwEl = screenEl.querySelector('#pwInput');
@@ -600,11 +805,31 @@ function bind(view){
           : await sb.auth.signInWithPassword({ email, password });
         if(error){ alert((mode==='up'?'註冊失敗：':'登入失敗：') + error.message); }
         else if(mode==='up' && !data.session){ alert('帳號已建立，但還需要驗證信箱，請確認後台已關閉 Confirm email。'); }
+        else if(data.session && (mode==='up' || state.dirty)){ currentUser = data.session.user; finishOnboarding(); }
       }catch(err){ alert('發生錯誤：' + err.message); }
       finally{ btn.textContent = label; btn.disabled = false; }
     };
     screenEl.querySelector('#signUpBtn').onclick = e => run(e.currentTarget, 'up');
     screenEl.querySelector('#signInBtn').onclick = e => run(e.currentTarget, 'in');
+  }
+  if(view==='home'){
+    // 隱藏開關：1.5 秒內連點首頁卡片的「今天的邀請」5 次，開啟 / 關閉測試模式（手機 PWA 沒有網址列時用）
+    const eb = screenEl.querySelector('.invite-card .eyebrow');
+    if(eb){
+      let n = 0, t = 0;
+      eb.onclick = ()=>{
+        const now = Date.now(); n = (now - t < 1500) ? n + 1 : 1; t = now;
+        if(n >= 5){
+          n = 0;
+          try{
+            const on = localStorage.getItem('nb_dev') === '1';
+            if(on) localStorage.removeItem('nb_dev'); else localStorage.setItem('nb_dev','1');
+            alert(on ? '測試模式已關閉' : '測試模式已開啟');
+          }catch(_){}
+          location.reload();
+        }
+      };
+    }
   }
   const saveBtn = screenEl.querySelector('#saveBtn');
   if(saveBtn){
@@ -634,6 +859,131 @@ function bind(view){
   screenEl.querySelectorAll('[data-recap-open]').forEach(el=>{
     el.onclick = ()=> openRecap(parseInt(el.dataset.recapOpen));
   });
+}
+
+// ================= D：存設定到 profiles ＋ 推播 =================
+const TEST_PUSH_AFTER_SAVE = true;   // 測試期：每次存完設定就送一則測試推播；正式上線前改成 false
+const VAPID_PUBLIC_KEY = 'BJjGBkhC6Gn23hfQ4pqFbH6FIBFJG4FK5BbIRdTw0_b-JY1dopOLDLbG_44pNcw_XPwr4U3rPsqOjEXTijqYLek';   // 用 npx web-push generate-vapid-keys 產生的公鑰
+
+async function loadProfile(){
+  if(!currentUser) return;
+  const { data } = await sb.from('profiles').select('*').eq('id', currentUser.id).maybeSingle();
+  if(!data) return;
+  state.profile = data;
+  if(state.dirty) return;   // 剛填完註冊資料、還沒存的時候，不要被舊資料蓋掉
+  state.routine.leave = data.leave_time; state.routine.off = data.off_time; state.routine.age = data.age_bracket;
+  state.perms.weekend = WEEKEND_FEATURE_READY ? (data.weekend_interest ?? true) : false;
+  state.perms.push = data.push_enabled ?? true;
+  state.region = data.region || null;
+}
+async function saveProfile(){
+  if(!currentUser) return {ok:false, reason:'尚未登入'};
+  const row = {
+    id: currentUser.id,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Taipei',
+    weekend_interest: state.perms.weekend,
+    push_enabled: state.perms.push,
+    region: state.region || null,
+  };
+  if(state.routine.leave) row.leave_time = state.routine.leave;
+  if(state.routine.off) row.off_time = state.routine.off;
+  if(state.routine.age) row.age_bracket = state.routine.age;
+  const { data, error } = await sb.from('profiles').upsert(row).select().single();
+  if(error){ console.error('存設定失敗', error); return {ok:false, reason:error.message}; }
+  state.profile = data; state.dirty = false;
+  return {ok:true};
+}
+
+function urlB64ToUint8Array(b64){
+  const s = (b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g,'+').replace(/_/g,'/');
+  return Uint8Array.from(atob(s), c => c.charCodeAt(0));
+}
+async function enablePush(){
+  if(!currentUser) return {ok:false, reason:'尚未登入'};
+  if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window))
+    return {ok:false, reason:'這個環境不支援推播（iPhone 需要先加到主畫面再開啟）'};
+  if(['localhost','127.0.0.1'].includes(location.hostname))
+    return {ok:false, reason:'localhost 沒有註冊 Service Worker，推播請在 GitHub Pages 上測'};
+  if(VAPID_PUBLIC_KEY.startsWith('PASTE'))
+    return {ok:false, reason:'index.html 裡還沒填 VAPID 公鑰'};
+  if(Notification.permission !== 'granted') return {ok:false, reason:'通知權限未開啟（' + Notification.permission + '）'};
+  const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((_,rej)=>setTimeout(()=>rej(new Error('Service Worker 逾時')), 6000))]);
+  let sub = await reg.pushManager.getSubscription();
+  if(!sub) sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY)});
+  const j = sub.toJSON();
+  const { error } = await sb.from('push_subscriptions').upsert({
+    user_id: currentUser.id, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth,
+    user_agent: navigator.userAgent.slice(0,200), failed_count: 0
+  }, {onConflict:'endpoint'});
+  if(error) return {ok:false, reason:error.message};
+  return {ok:true};
+}
+async function sendTestPush(){
+  const { data, error } = await sb.functions.invoke('send-test-push', {body:{}});
+  if(error) return {ok:false, reason:error.message};
+  return data && data.sent > 0 ? {ok:true, sent:data.sent} : {ok:false, reason:(data && data.message) || '沒有可用的推播訂閱'};
+}
+// 存設定 →（有開提醒）訂閱推播 →（測試期）送一則測試推播。回傳每一步的結果文字，方便測試時看
+async function saveSettingsFlow(){
+  const log = [];
+  const s = await saveProfile();
+  log.push(s.ok ? '✓ 設定已存到 profiles' : '✗ 存設定失敗：' + s.reason);
+  if(!s.ok) return log;
+  if(state.perms.push){
+    let p; try{ p = await enablePush(); }catch(e){ p = {ok:false, reason:e.message}; }
+    log.push(p.ok ? '✓ 推播訂閱完成' : '✗ 推播訂閱：' + p.reason);
+    if(p.ok && TEST_PUSH_AFTER_SAVE){
+      let t; try{ t = await sendTestPush(); }catch(e){ t = {ok:false, reason:e.message}; }
+      log.push(t.ok ? '✓ 測試推播已送出（' + t.sent + ' 台裝置）' : '✗ 測試推播：' + t.reason);
+    }
+  }else{
+    log.push('（提醒已關閉，不訂閱推播）');
+  }
+  console.log(log.join('\n'));
+  return log;
+}
+async function finishOnboarding(){
+  const log = await saveSettingsFlow();
+  if(DEV) alert(log.join('\n'));
+}
+
+// ---- 開發測試面板（只在 DEV 顯示）----
+function openDevPanel(){
+  const optW = ['<option value="">自動（目前沒有天氣資料）</option>'].concat(
+    Object.entries(WEATHER_LABELS).map(([k,v])=>`<option value="${k}" ${devOverride.weather===k?'selected':''}>${v}</option>`)).join('');
+  const optR = ['<option value="">不選</option>'].concat(
+    REGIONS.map(([k,v])=>`<option value="${k}" ${state.region===k?'selected':''}>${v}</option>`)).join('');
+  overlayEl.innerHTML = `<div style="background:var(--paper); border-radius:18px; padding:18px; overflow:auto; font-size:13px; color:var(--ink)">
+    <div style="display:flex; justify-content:space-between; margin-bottom:12px"><b>測試面板</b><span id="devClose" style="cursor:pointer; font-size:20px; line-height:1">×</span></div>
+    <p class="small" style="margin:0 0 4px">天氣（手動指定）</p>
+    <select id="dvWeather" style="width:100%; padding:8px; margin-bottom:10px">${optW}</select>
+    <p class="small" style="margin:0 0 4px">地區（會存進 profiles）</p>
+    <select id="dvRegion" style="width:100%; padding:8px; margin-bottom:10px">${optR}</select>
+    <p class="small" style="margin:0 0 4px">日期（測節氣用，留空 = 今天）</p>
+    <input id="dvDate" type="date" value="${devOverride.date||''}" style="width:100%; padding:8px; margin-bottom:12px">
+    <button class="btn block" id="dvApply">套用並回首頁</button>
+    <button class="btn ghost block" id="dvSave">存設定並送測試推播</button>
+    <p class="small" id="dvMsg" style="white-space:pre-line; margin:6px 0 0"></p>
+  </div>`;
+  overlayEl.style.display = 'flex';
+  overlayEl.onclick = e=>{ if(e.target===overlayEl) closeRecap(); };
+  const $$ = id => overlayEl.querySelector(id);
+  $$('#devClose').onclick = closeRecap;
+  const readInputs = ()=>{
+    devOverride.weather = $$('#dvWeather').value || null;
+    devOverride.date = $$('#dvDate').value || null;
+    const r = $$('#dvRegion').value || null;
+    if(r !== state.region){ state.region = r; state.dirty = true; }
+  };
+  $$('#dvApply').onclick = ()=>{ readInputs(); closeRecap(); goTo('home', {resetStack:true}); };
+  $$('#dvSave').onclick = async ()=>{
+    readInputs();
+    // 通知權限必須在點擊當下就要求（iOS 會擋掉非手勢觸發的詢問）
+    if('Notification' in window && Notification.permission === 'default'){ try{ await Notification.requestPermission(); }catch(_){} }
+    $$('#dvMsg').textContent = '處理中...';
+    const log = await saveSettingsFlow();
+    $$('#dvMsg').textContent = log.join('\n');
+  };
 }
 
 // ---- 週回顧：Overlay（疊在目前畫面上，不切換頁面）----
@@ -681,6 +1031,14 @@ screenEl.addEventListener('touchend', e=>{
   touchStartY = null;
 });
 
+document.getElementById('uploadInput').onchange = (e)=>{
+  // 從相簿上傳：算進「上傳當天」，不做日期調整；之後流程與拍照相同
+  const files = Array.from(e.target.files || []);
+  if(files.length){ state.photos.push(...files); }
+  e.target.value = '';
+  if(files.length) goTo('postCapture');
+};
+
 document.getElementById('cameraInput').onchange = (e)=>{
   const file = e.target.files[0];
   if(file){ state.photos.push(file); }
@@ -695,7 +1053,7 @@ if('serviceWorker' in navigator && !['localhost','127.0.0.1'].includes(location.
   (async ()=>{
   const { data } = await sb.auth.getSession();
   currentUser = data.session?.user ?? null;
-  if(currentUser){ await loadWeekEntries(); }
+  if(currentUser){ await loadWeekEntries(); await loadProfile(); }
 
   currentView = currentUser ? 'home' : 'onboard1';
   render(currentView);
@@ -703,7 +1061,7 @@ if('serviceWorker' in navigator && !['localhost','127.0.0.1'].includes(location.
   sb.auth.onAuthStateChange(async (event, session)=>{
     currentUser = session?.user ?? null;
     if(event === 'SIGNED_IN' && currentUser){
-      await loadWeekEntries();
+      await loadWeekEntries(); await loadProfile();
       if(currentView.startsWith('onboard')){ goTo('home', {resetStack:true}); }
     }
     if(event === 'SIGNED_OUT'){ goTo('onboard1', {resetStack:true}); }
