@@ -929,9 +929,10 @@ async function enablePush(){
   return {ok:true};
 }
 async function sendTestPush(){
-  const { data, error } = await sb.functions.invoke('send-test-push', {body:{}});
+  // 呼叫排程用的同一支函式（模擬模式）：用測試面板選的天氣與日期，挑句邏輯與每天早上的推播完全相同
+  const { data, error } = await sb.functions.invoke('send-morning-push', {body:{simulate:true, weather: devOverride.weather, date: devOverride.date}});
   if(error) return {ok:false, reason:error.message};
-  return data && data.sent > 0 ? {ok:true, sent:data.sent} : {ok:false, reason:(data && data.message) || '沒有可用的推播訂閱'};
+  return data && data.sent > 0 ? {ok:true, sent:data.sent, text:data.text} : {ok:false, reason:(data && data.message) || '沒有可用的推播訂閱'};
 }
 // 存設定 →（有開提醒）訂閱推播 →（測試期）送一則測試推播。回傳每一步的結果文字，方便測試時看
 async function saveSettingsFlow(){
@@ -944,7 +945,7 @@ async function saveSettingsFlow(){
     log.push(p.ok ? '✓ 推播訂閱完成' : '✗ 推播訂閱：' + p.reason);
     if(p.ok && TEST_PUSH_AFTER_SAVE){
       let t; try{ t = await sendTestPush(); }catch(e){ t = {ok:false, reason:e.message}; }
-      log.push(t.ok ? '✓ 測試推播已送出（' + t.sent + ' 台裝置）' : '✗ 測試推播：' + t.reason);
+      log.push(t.ok ? '✓ 測試推播已送出（' + t.sent + ' 台裝置）：' + t.text : '✗ 測試推播：' + t.reason);
     }
   }else{
     log.push('（提醒已關閉，不訂閱推播）');
