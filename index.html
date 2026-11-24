@@ -356,28 +356,35 @@ function currentSolarTerm(m, d){
   for(const t of SOLAR_TERMS){ if(t[0]<m || (t[0]===m && t[1]<=d)) cur = t; }
   return cur;
 }
-// 一天一句、同一天內固定；三層合併的加權抽選（區域句符合時權重最高，節氣句不會被區域句擠掉）
+// 小字挑句：嚴格依優先順序，由上往下，第一層有句子就用那一層
+//   1. 節氣句（只要「不突兀」：沒有天氣限制、天氣未知，或限制天氣含今天的天氣）
+//   2. 區域專屬句（地區、月份、天氣都符合）
+//   3. 天氣句
+// 同一層有多句時，依日期固定挑一句（同一天不會變）
+const SOLAR_SHOW_DAYS = 16;   // 節氣句從節氣當天起顯示幾天；16 = 整個節氣期間都顯示，想只在前幾天出現就調小
 function todayInvitation(){
   const {y,m,d} = invDate();
   const dayNum = Math.floor(Date.UTC(y, m-1, d)/86400000);
   const w = devOverride.weather || null;
   if(w==='severe') return {main: SEVERE_LINE, sub: null, ids:['severe']};
   const daily = DAILY_LINES[((dayNum % DAILY_LINES.length)+DAILY_LINES.length) % DAILY_LINES.length];
-  const pool = [];
-  if(w && WEATHER_LINES[w]) WEATHER_LINES[w].forEach(([id,t])=> pool.push({id, t, wt:1}));
-  REGION_LINES.forEach(r=>{
-    if(state.region && r.regions.includes(state.region)
-       && (!r.months || r.months.includes(m)) && (!r.weathers || !w || r.weathers.includes(w)))
-      pool.push({id:r.id, t:r.t, wt:3});
-  });
-  const st = currentSolarTerm(m, d);
-  if(!st[4] || (w && st[4].includes(w))) pool.push({id:st[2], t:st[3], wt:2});
+  const rnd = seededRand(dayNum + 7919);
+  const pickFrom = arr => arr[Math.min(arr.length-1, Math.floor(rnd*arr.length))];
   let sub = null;
-  if(pool.length){
-    const total = pool.reduce((s,p)=>s+p.wt, 0);
-    let r = seededRand(dayNum + 7919) * total;
-    for(const p of pool){ r -= p.wt; if(r < 0){ sub = p; break; } }
-    sub = sub || pool[pool.length-1];
+  // 1. 節氣
+  const st = currentSolarTerm(m, d);
+  const termYear = (st[0] > m || (st[0]===m && st[1] > d)) ? y-1 : y;
+  const daysIn = Math.floor((Date.UTC(y, m-1, d) - Date.UTC(termYear, st[0]-1, st[1]))/86400000);
+  if(daysIn < SOLAR_SHOW_DAYS && (!st[4] || !w || st[4].includes(w))) sub = {id:st[2], t:st[3]};
+  // 2. 區域專屬
+  if(!sub && state.region){
+    const cand = REGION_LINES.filter(r => r.regions.includes(state.region)
+      && (!r.months || r.months.includes(m)) && (!r.weathers || !w || r.weathers.includes(w)));
+    if(cand.length) sub = pickFrom(cand);
+  }
+  // 3. 天氣
+  if(!sub && w && WEATHER_LINES[w]){
+    const [id,t] = pickFrom(WEATHER_LINES[w]); sub = {id, t};
   }
   return {main: daily[1], sub: sub ? sub.t : null, ids:[daily[0], sub ? sub.id : null]};
 }
