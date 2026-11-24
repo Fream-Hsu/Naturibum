@@ -469,17 +469,30 @@ function treeIcon(size=44){
   </svg>`;
 }
 
+function dayKey(ts){
+  const d = new Date(ts);
+  return d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+}
 function currentEntries(){
   const source = (currentUser && weekEntries.length) ? weekEntries : demoEntries;
   return source.map(e => 'note' in e
-    ? { kind: e.species ? 'id':'plain', species: e.species, text: e.note||'', photos: (e.entry_photos||[]).length||1, urls: e.urls||[] }
-    : e
+    ? { kind: e.species ? 'id':'plain', species: e.species, text: e.note||'', photos: (e.entry_photos||[]).length||1, urls: e.urls||[], day: dayKey(e.created_at) }
+    : { ...e, day: 'demo-' + e.id }
   );
 }
 
+// 首頁小植物：一天一株（同一天無論記幾則都只算一株，一週最多 7 株）。
+// 當天有任何一則辨識過 → 葉脈；當天有任何一則寫了文字 → 開花。點下去打開當天第一則的回顧
 function miniPlantsHTML(){
-  return currentEntries().map((e,idx)=>
-    `<span class="plant-block" data-recap-open="${idx}">${plantIcon(e, 51, 'mini')}</span>`
+  const days = [];
+  currentEntries().forEach((e,idx)=>{
+    let d = days.find(x=>x.day===e.day);
+    if(!d){ d = {day:e.day, kind:'plain', text:'', first:idx}; days.push(d); }
+    if(e.kind==='id') d.kind = 'id';
+    if(e.text && e.text.trim()) d.text = e.text;
+  });
+  return days.map(d=>
+    `<span class="plant-block" data-recap-open="${d.first}">${plantIcon(d, 51, 'mini')}</span>`
   ).join('');
 }
 
@@ -932,7 +945,7 @@ async function sendTestPush(){
   // 呼叫排程用的同一支函式（模擬模式）：用測試面板選的天氣與日期，挑句邏輯與每天早上的推播完全相同
   const { data, error } = await sb.functions.invoke('send-morning-push', {body:{simulate:true, weather: devOverride.weather, date: devOverride.date}});
   if(error) return {ok:false, reason:error.message};
-  return data && data.sent > 0 ? {ok:true, sent:data.sent, text:data.text} : {ok:false, reason:(data && data.message) || '沒有可用的推播訂閱'};
+  return data && data.sent > 0 ? {ok:true, sent:data.sent, text:data.text, lineId:data.lineId} : {ok:false, reason:(data && data.message) || '沒有可用的推播訂閱'};
 }
 // 存設定 →（有開提醒）訂閱推播 →（測試期）送一則測試推播。回傳每一步的結果文字，方便測試時看
 async function saveSettingsFlow(){
@@ -946,6 +959,13 @@ async function saveSettingsFlow(){
     if(p.ok && TEST_PUSH_AFTER_SAVE){
       let t; try{ t = await sendTestPush(); }catch(e){ t = {ok:false, reason:e.message}; }
       log.push(t.ok ? '✓ 測試推播已送出（' + t.sent + ' 台裝置）：' + t.text : '✗ 測試推播：' + t.reason);
+      if(t.ok){
+        const inv = todayInvitation();
+        const local = inv.ids[1];
+        const inv2 = invDate();
+        log.push('條件：' + inv2.y + '-' + inv2.m + '-' + inv2.d + '、天氣=' + (devOverride.weather ? WEATHER_LABELS[devOverride.weather] : '未指定') + '、地區=' + (state.region || '未選'));
+        log.push('句子 ID：伺服器 ' + t.lineId + (local ? '｜網頁預期 ' + local : '') + (local && local !== t.lineId ? '（兩邊不同）' : ''));
+      }
     }
   }else{
     log.push('（提醒已關閉，不訂閱推播）');
